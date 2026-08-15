@@ -27,13 +27,27 @@ jobs:
           sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
             gettext git libncurses5-dev libssl-dev python3 python3-setuptools \
             rsync unzip zlib1g-dev wget bash
+          # 限制 ccache 体积，避免把 runner 磁盘吃满
+          ccache --max-size=8G || true
+
+      - name: Restore build cache (incremental)
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          # 同一 ref 共享一份缓存：首跑全量并落盘，之后只重编改动部分（内核+镜像）
+          key: owrt-x86-64-dft-${{ github.event.inputs.ref || 'v25.12.1' }}
+          path: |
+            dl
+            staging_dir
+            .ccache
+            build_dir
 
       - name: Feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure (official 25.12.1 base + DYNAMIC_FTRACE)
+      - name: Configure (official 25.12.1 base + DYNAMIC_FTRACE + ccache)
         run: |
           # 以官方发布时的完整构建配置为底座（含全部默认包集 + FTRACE/BTF/KPROBES/NETKIT）
           # 这样产出 = 官方镜像 + DYNAMIC_FTRACE，且所有 kmod 随内核一起编、自洽匹配
@@ -44,12 +58,18 @@ jobs:
           # 确保目标无误
           echo 'CONFIG_TARGET_x86_64_DEVICE_generic=y' >> .config
           make defconfig
+          # ccache（编译器缓存）：首次填充，之后相同源码命中率 ~65%+，数量级加速
+          echo 'CONFIG_DEVEL=y' >> .config
+          echo 'CONFIG_CCACHE=y' >> .config
+          make defconfig
           # 官方底座已含 FTRACE/BTF/KPROBES/NETKIT，只缺 DYNAMIC_FTRACE（fentry 能 poke NOP 桩的关键）
           echo 'CONFIG_KERNEL_FUNCTION_TRACER=y' >> .config
           echo 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' >> .config
           make defconfig
           echo "=== resolved KERNEL_* symbols in .config ==="
           grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE|BTF|NETKIT|KPROBES)=' .config
+          echo "=== ccache enabled? ==="
+          grep -E 'CONFIG_CCACHE=y' .config
           echo "=== assert DYNAMIC_FTRACE enabled ==="
           grep -qx 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' .config || { echo "ERROR: KERNEL_DYNAMIC_FTRACE not enabled in .config"; exit 1; }
 
@@ -67,6 +87,18 @@ jobs:
           name: immortalwrt-x86-64-combined-efi
           path: bin/targets/x86/64/*combined-efi*.img.gz
           if-no-files-found: error
+
+      - name: Save build cache (incremental)
+        # 不论成功失败都尽量落盘缓存（失败也会保留已编部分，下次续编更快）
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          key: owrt-x86-64-dft-${{ github.event.inputs.ref || 'v25.12.1' }}
+          path: |
+            dl
+            staging_dir
+            .ccache
+            build_dir
 
       - name: Notify success (ServerChan)
         if: success()
