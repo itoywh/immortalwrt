@@ -36,16 +36,21 @@ jobs:
       - name: Configure (x86_64 + DYNAMIC_FTRACE)
         run: |
           # 选目标：x86 -> x86_64 -> generic
-          ./scripts/config -e TARGET_x86
-          ./scripts/config -e TARGET_x86_64
-          ./scripts/config -e TARGET_x86_64_DEVICE_generic
-          # 开 ftrace / dynamic ftrace（dae 的 fentry 需要这个才能 poke NOP 桩）
-          ./scripts/config -e KERNEL_FTRACE
-          ./scripts/config -e KERNEL_FUNCTION_TRACER
-          ./scripts/config -e KERNEL_DYNAMIC_FTRACE
+          echo 'CONFIG_TARGET_x86=y' > .config
+          echo 'CONFIG_TARGET_x86_64=y' >> .config
+          echo 'CONFIG_TARGET_x86_64_DEVICE_generic=y' >> .config
           make defconfig
-          echo "=== resolved KERNEL_* symbols ==="
+          # 开 ftrace / dynamic ftrace（dae 的 fentry 需要这个才能 poke NOP 桩）
+          # 注意：新版 immortalwrt 的 scripts/config 已变成目录，不能用 ./scripts/config -e
+          # 改为直接写 .config 再 make defconfig 合并（defconfig 模式会保留已设符号）
+          echo 'CONFIG_KERNEL_FTRACE=y' >> .config
+          echo 'CONFIG_KERNEL_FUNCTION_TRACER=y' >> .config
+          echo 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' >> .config
+          make defconfig
+          echo "=== resolved KERNEL_* symbols in .config ==="
           grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE)=' .config
+          echo "=== assert DYNAMIC_FTRACE enabled ==="
+          grep -qx 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' .config || { echo "ERROR: KERNEL_DYNAMIC_FTRACE not enabled in .config"; exit 1; }
 
       - name: Build
         run: make -j$(nproc) world
