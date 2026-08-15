@@ -1,0 +1,63 @@
+name: Build ImmortalWrt x86_64 (DYNAMIC_FTRACE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ImmortalWrt ref to build
+        required: false
+        default: v25.12.1
+  push:
+    branches: [build-dynamic-ftrace]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'v25.12.1' }}
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+            gettext git libncurses5-dev libssl-dev python3 python3-setuptools \
+            rsync unzip zlib1g-dev wget bash
+
+      - name: Feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure (x86_64 + DYNAMIC_FTRACE)
+        run: |
+          # 选目标：x86 -> x86_64 -> generic
+          ./scripts/config -e TARGET_x86
+          ./scripts/config -e TARGET_x86_64
+          ./scripts/config -e TARGET_x86_64_DEVICE_generic
+          # 开 ftrace / dynamic ftrace（dae 的 fentry 需要这个才能 poke NOP 桩）
+          ./scripts/config -e KERNEL_FTRACE
+          ./scripts/config -e KERNEL_FUNCTION_TRACER
+          ./scripts/config -e KERNEL_DYNAMIC_FTRACE
+          make defconfig
+          echo "=== resolved KERNEL_* symbols ==="
+          grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE)=' .config
+
+      - name: Build
+        run: make -j$(nproc) world
+
+      - name: Verify DYNAMIC_FTRACE in built kernel config
+        run: |
+          find build_dir -name .config -path '*linux-x86_64*' \
+            -exec grep -H -E 'CONFIG_(DYNAMIC_FTRACE|FUNCTION_TRACER|FTRACE)=' {} \;
+
+      - name: Upload combined-efi image
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-x86-64-combined-efi
+          path: bin/targets/x86/64/*combined-efi*.img.gz
+          if-no-files-found: error
