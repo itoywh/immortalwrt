@@ -33,22 +33,23 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure (x86_64 + DYNAMIC_FTRACE)
+      - name: Configure (official 25.12.1 base + DYNAMIC_FTRACE)
         run: |
-          # 选目标：x86 -> x86_64 -> generic
-          echo 'CONFIG_TARGET_x86=y' > .config
-          echo 'CONFIG_TARGET_x86_64=y' >> .config
+          # 以官方发布时的完整构建配置为底座（含全部默认包集 + FTRACE/BTF/KPROBES/NETKIT）
+          # 这样产出 = 官方镜像 + DYNAMIC_FTRACE，且所有 kmod 随内核一起编、自洽匹配
+          curl -sSL "https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64/config.buildinfo" -o .config
+          # 关掉两个吃磁盘/拖时间的选项（不影响功能包集），避免 runner 爆盘白等
+          sed -i 's/^CONFIG_ALL_KMODS=y/# CONFIG_ALL_KMODS is not set/' .config
+          sed -i 's/^CONFIG_COLLECT_KERNEL_DEBUG=y/# CONFIG_COLLECT_KERNEL_DEBUG is not set/' .config
+          # 确保目标无误
           echo 'CONFIG_TARGET_x86_64_DEVICE_generic=y' >> .config
           make defconfig
-          # 开 ftrace / dynamic ftrace（dae 的 fentry 需要这个才能 poke NOP 桩）
-          # 注意：新版 immortalwrt 的 scripts/config 已变成目录，不能用 ./scripts/config -e
-          # 改为直接写 .config 再 make defconfig 合并（defconfig 模式会保留已设符号）
-          echo 'CONFIG_KERNEL_FTRACE=y' >> .config
+          # 官方底座已含 FTRACE/BTF/KPROBES/NETKIT，只缺 DYNAMIC_FTRACE（fentry 能 poke NOP 桩的关键）
           echo 'CONFIG_KERNEL_FUNCTION_TRACER=y' >> .config
           echo 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' >> .config
           make defconfig
           echo "=== resolved KERNEL_* symbols in .config ==="
-          grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE)=' .config
+          grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE|BTF|NETKIT|KPROBES)=' .config
           echo "=== assert DYNAMIC_FTRACE enabled ==="
           grep -qx 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' .config || { echo "ERROR: KERNEL_DYNAMIC_FTRACE not enabled in .config"; exit 1; }
 
