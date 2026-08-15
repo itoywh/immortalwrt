@@ -66,3 +66,19 @@ jobs:
           name: immortalwrt-x86-64-combined-efi
           path: bin/targets/x86/64/*combined-efi*.img.gz
           if-no-files-found: error
+
+      - name: Notify success (PushPlus)
+        if: success()
+        continue-on-error: true
+        run: |
+          curl -sS -X POST https://www.pushplus.plus/send \
+            -H "Content-Type: application/json" \
+            -d '{"token":"${{ secrets.PUSHPLUS_TOKEN }}","title":"✅ immortalwrt x86_64 构建成功 (DYNAMIC_FTRACE)","content":"run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","template":"txt"}'
+
+      - name: Notify failure (PushPlus)
+        if: failure()
+        continue-on-error: true
+        run: |
+          curl -sS -X POST https://www.pushplus.plus/send \
+            -H "Content-Type: application/json" \
+            -d '{"token":"${{ secrets.PUSHPLUS_TOKEN }}","title":"❌ immortalwrt x86_64 构建失败","content":"run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","template":"txt"}'
