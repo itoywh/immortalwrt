@@ -27,6 +27,9 @@ jobs:
           sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
             gettext git libncurses5-dev libssl-dev python3 python3-setuptools \
             rsync unzip zlib1g-dev wget bash
+          # x86_64 镜像生成所需的宿主工具（官方 config.buildinfo 默认开启 ISO/VMDK/VHDX）
+          # ubuntu runner 默认没有，缺失会导致 image prereq 检查失败（mkisofs 报错）
+          sudo apt-get install -y genisoimage mtools qemu-utils
           # 限制 ccache 体积，避免把 runner 磁盘吃满
           ccache --max-size=8G || true
 
@@ -90,7 +93,9 @@ jobs:
 
       - name: Save build cache (incremental)
         # 不论成功失败都尽量落盘缓存（失败也会保留已编部分，下次续编更快）
+        # continue-on-error：若同名 key 已存在（restore 命中后 save 冲突）不要因此把 job 标红
         if: always()
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           key: owrt-x86-64-dft-${{ github.event.inputs.ref || 'v25.12.1' }}
