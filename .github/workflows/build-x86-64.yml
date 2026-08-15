@@ -68,6 +68,11 @@ jobs:
           # 官方底座已含 FTRACE/BTF/KPROBES/NETKIT，只缺 DYNAMIC_FTRACE（fentry 能 poke NOP 桩的关键）
           echo 'CONFIG_KERNEL_FUNCTION_TRACER=y' >> .config
           echo 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' >> .config
+          # 把原先靠 apk add 后装的 kmod 直接编进镜像
+          # （自编译改了内核哈希，官方源 kmod 已不兼容，必须随镜像一起烘焙，否则 dae 的 nft_socket/tproxy/bridge 用不了）
+          echo 'CONFIG_PACKAGE_kmod-nft-socket=y' >> .config
+          echo 'CONFIG_PACKAGE_kmod-nft-tproxy=y' >> .config
+          echo 'CONFIG_PACKAGE_kmod-nft-bridge=y' >> .config
           make defconfig
           echo "=== resolved KERNEL_* symbols in .config ==="
           grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE|BTF|NETKIT|KPROBES)=' .config
@@ -75,6 +80,10 @@ jobs:
           grep -E 'CONFIG_CCACHE=y' .config
           echo "=== assert DYNAMIC_FTRACE enabled ==="
           grep -qx 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' .config || { echo "ERROR: KERNEL_DYNAMIC_FTRACE not enabled in .config"; exit 1; }
+          echo "=== assert nft kmods selected (否则 defconfig 把依赖没满足的包静默丢弃了) ==="
+          for k in kmod-nft-socket kmod-nft-tproxy kmod-nft-bridge; do
+            grep -qx "CONFIG_PACKAGE_$k=y" .config || { echo "ERROR: $k not enabled in .config (kernel dep unsatisfied?)"; exit 1; }
+          done
 
       - name: Build
         run: make -j$(nproc) world
