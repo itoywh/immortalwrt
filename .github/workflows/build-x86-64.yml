@@ -67,18 +67,18 @@ jobs:
           path: bin/targets/x86/64/*combined-efi*.img.gz
           if-no-files-found: error
 
-      - name: Notify success (PushPlus)
+      - name: Notify success (ServerChan)
         if: success()
         continue-on-error: true
         run: |
-          curl -sS -X POST https://www.pushplus.plus/send \
-            -H "Content-Type: application/json" \
-            -d '{"token":"${{ secrets.PUSHPLUS_TOKEN }}","title":"✅ immortalwrt x86_64 构建成功 (DYNAMIC_FTRACE)","content":"run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","template":"txt"}'
+          curl -sS -G "https://sctapi.ftqq.com/${{ secrets.SERVERCHAN_SENDKEY }}.send" \
+            --data-urlencode "title=✅ immortalwrt x86_64 构建成功 (DYNAMIC_FTRACE)" \
+            --data-urlencode "desp=run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-      - name: Notify failure (PushPlus)
+      - name: Notify failure (ServerChan)
         if: failure()
         continue-on-error: true
         run: |
-          curl -sS -X POST https://www.pushplus.plus/send \
-            -H "Content-Type: application/json" \
-            -d '{"token":"${{ secrets.PUSHPLUS_TOKEN }}","title":"❌ immortalwrt x86_64 构建失败","content":"run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}","template":"txt"}'
+          curl -sS -G "https://sctapi.ftqq.com/${{ secrets.SERVERCHAN_SENDKEY }}.send" \
+            --data-urlencode "title=❌ immortalwrt x86_64 构建失败" \
+            --data-urlencode "desp=run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
