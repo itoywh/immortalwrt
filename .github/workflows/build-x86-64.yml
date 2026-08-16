@@ -86,7 +86,7 @@ jobs:
           done
 
       - name: Build
-        run: make -j$(nproc) world
+        run: make -j$(nproc) world V=s
 
       - name: Verify DYNAMIC_FTRACE in built kernel config
         run: |
