@@ -50,12 +50,13 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure (official 25.12.1 base — baseline run, no dae delta)
+      - name: Configure (official 25.12.1 base + DYNAMIC_FTRACE + ccache)
         run: |
-          # 以官方发布时的完整构建配置为底座（含全部默认包集 + FTRACE/BTF/KPROBES/NETKIT + ALL_KMODS）
-          # 纯官方基线运行：不加重 DYNAMIC_FTRACE / 不显式加 nft kmod，先跑通留 cache
+          # 以官方发布时的完整构建配置为底座（含全部默认包集 + FTRACE/BTF/KPROBES/NETKIT）
+          # 这样产出 = 官方镜像 + DYNAMIC_FTRACE，且所有 kmod 随内核一起编、自洽匹配
           curl -sSL "https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64/config.buildinfo" -o .config
-          # 仅关掉吃磁盘的非功能选项（保留 ALL_KMODS，让官方 kmod 随内核一起编、自洽）
+          # 关掉两个吃磁盘/拖时间的选项（不影响功能包集），避免 runner 爆盘白等
+          sed -i 's/^CONFIG_ALL_KMODS=y/# CONFIG_ALL_KMODS is not set/' .config
           sed -i 's/^CONFIG_COLLECT_KERNEL_DEBUG=y/# CONFIG_COLLECT_KERNEL_DEBUG is not set/' .config
           # 确保目标无误
           echo 'CONFIG_TARGET_x86_64_DEVICE_generic=y' >> .config
@@ -64,8 +65,14 @@ jobs:
           echo 'CONFIG_DEVEL=y' >> .config
           echo 'CONFIG_CCACHE=y' >> .config
           make defconfig
-          # 基线阶段不加重 DYNAMIC_FTRACE（dae 的 fentry→kprobe 回退在 6.12 上已 work）；后续叠加阶段再加
-          # 基线阶段不显式加 nft kmod（ALL_KMODS 已把它们编成包）；后续叠加阶段再显式烘焙进镜像
+          # 官方底座已含 FTRACE/BTF/KPROBES/NETKIT，只缺 DYNAMIC_FTRACE（fentry 能 poke NOP 桩的关键）
+          echo 'CONFIG_KERNEL_FUNCTION_TRACER=y' >> .config
+          echo 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' >> .config
+          # 把原先靠 apk add 后装的 kmod 直接编进镜像
+          # （自编译改了内核哈希，官方源 kmod 已不兼容，必须随镜像一起烘焙，否则 dae 的 nft_socket/tproxy/bridge 用不了）
+          echo 'CONFIG_PACKAGE_kmod-nft-socket=y' >> .config
+          echo 'CONFIG_PACKAGE_kmod-nft-tproxy=y' >> .config
+          echo 'CONFIG_PACKAGE_kmod-nft-bridge=y' >> .config
           make defconfig
           # 剔除官方 buildbot 全量测试/开发/构建冗余包（路由器固件用不到，且 kselftests-bpf 会导致构建失败）
           # kselftests-bpf 是内核 BPF 自测套件，纯开发用途，上次 <3h build 收尾时挂掉
@@ -83,9 +90,12 @@ jobs:
           grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE|BTF|NETKIT|KPROBES)=' .config
           echo "=== ccache enabled? ==="
           grep -E 'CONFIG_CCACHE=y' .config
-          echo "=== baseline assertions: ccache + official base present ==="
-          grep -qx 'CONFIG_CCACHE=y' .config || { echo "ERROR: CCACHE not enabled"; exit 1; }
-          grep -qE '^CONFIG_ALL_KMODS=y' .config || { echo "ERROR: ALL_KMODS not enabled in baseline"; exit 1; }
+          echo "=== assert DYNAMIC_FTRACE enabled ==="
+          grep -qx 'CONFIG_KERNEL_DYNAMIC_FTRACE=y' .config || { echo "ERROR: KERNEL_DYNAMIC_FTRACE not enabled in .config"; exit 1; }
+          echo "=== assert nft kmods selected (否则 defconfig 把依赖没满足的包静默丢弃了) ==="
+          for k in kmod-nft-socket kmod-nft-tproxy kmod-nft-bridge; do
+            grep -qx "CONFIG_PACKAGE_$k=y" .config || { echo "ERROR: $k not enabled in .config (kernel dep unsatisfied?)"; exit 1; }
+          done
 
       - name: Prepare ccache wrapper (fix incremental-cache race)
         run: |
@@ -100,10 +110,10 @@ jobs:
       - name: Build
         run: make -j$(nproc) world
 
-      - name: Verify baseline kernel config (official FTRACE/BTF/NETKIT present, DYNAMIC_FTRACE absent by design)
+      - name: Verify DYNAMIC_FTRACE in built kernel config
         run: |
           find build_dir -name .config -path '*linux-x86_64*' \
-            -exec grep -H -E 'CONFIG_(FTRACE|FUNCTION_TRACER|BTF|NETKIT|KPROBES|ALL_KMODS)=' {} \;
+            -exec grep -H -E 'CONFIG_(DYNAMIC_FTRACE|FUNCTION_TRACER|FTRACE)=' {} \;
 
       - name: Upload combined-efi image
         uses: actions/upload-artifact@v4
@@ -131,7 +141,7 @@ jobs:
         continue-on-error: true
         run: |
           curl -sS -G "https://sctapi.ftqq.com/${{ secrets.SERVERCHAN_SENDKEY }}.send" \
-            --data-urlencode "title=✅ immortalwrt x86_64 官方基线构建成功 (cache seeded)" \
+            --data-urlencode "title=✅ immortalwrt x86_64 构建成功 (DYNAMIC_FTRACE)" \
             --data-urlencode "desp=run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Notify failure (ServerChan)
