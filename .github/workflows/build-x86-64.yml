@@ -74,6 +74,18 @@ jobs:
           echo 'CONFIG_PACKAGE_kmod-nft-tproxy=y' >> .config
           echo 'CONFIG_PACKAGE_kmod-nft-bridge=y' >> .config
           make defconfig
+          # 剔除官方 buildbot 全量测试/开发/构建冗余包（路由器固件用不到，且 kselftests-bpf 会导致构建失败）
+          # kselftests-bpf 是内核 BPF 自测套件，纯开发用途，上次 <3h build 收尾时挂掉
+          sed -i 's/^CONFIG_PACKAGE_kselftests-bpf=[ym]/# CONFIG_PACKAGE_kselftests-bpf is not set/' .config
+          sed -i 's/^CONFIG_PACKAGE_perf=[ym]/# CONFIG_PACKAGE_perf is not set/' .config
+          # 只编默认 x86/64 设备，跳过所有机型镜像（官方 buildbot 全量 ALL_PROFILES 纯浪费时间）
+          sed -i 's/^CONFIG_TARGET_ALL_PROFILES=y/# CONFIG_TARGET_ALL_PROFILES is not set/' .config
+          # 不需要 ImageBuilder/SDK（开发用，固件不需要）
+          sed -i 's/^CONFIG_IB=y/# CONFIG_IB is not set/' .config
+          sed -i 's/^CONFIG_SDK=y/# CONFIG_SDK is not set/' .config
+          sed -i 's/^CONFIG_SDK_LLVM_BPF=y/# CONFIG_SDK_LLVM_BPF is not set/' .config
+          echo "=== buildbot-trim applied ==="
+          grep -E 'CONFIG_PACKAGE_kselftests-bpf|CONFIG_TARGET_ALL_PROFILES|CONFIG_IB|CONFIG_SDK' .config || true
           echo "=== resolved KERNEL_* symbols in .config ==="
           grep -E 'CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE|BTF|NETKIT|KPROBES)=' .config
           echo "=== ccache enabled? ==="
